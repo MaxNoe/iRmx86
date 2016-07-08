@@ -14,6 +14,8 @@ filetypes = {
     9: 'unknown',
 }
 
+Flags = namedtuple('Flags', ['allocated', 'long_file', 'modified', 'deleted'])
+
 ISOVolumeLabel = namedtuple(
     'ISOVolumeLabel',
     [
@@ -114,7 +116,7 @@ class FileSystem:
             fnode_data = raw_data[i * fnode_size: (i + 1) * fnode_size]
             fnode = self._read_fnode(fnode_data)
 
-            if fnode.flags['allocated']:
+            if fnode.flags.allocated:
                 self.fnodes.append(fnode)
 
     def _read_fnode(self, raw_data):
@@ -169,12 +171,12 @@ class FileSystem:
         flags = '{0:016b}'.format(flags)[::-1]
 
         flags = list(map(lambda x: bool(int(x)), flags))
-        flags = {
-            'allocated': flags[0],
-            'long_file': flags[1],
-            'modified': flags[5],
-            'deleted': flags[6],
-        }
+        flags = Flags(
+            allocated=flags[0],
+            long_file=flags[1],
+            modified=flags[5],
+            deleted=flags[6],
+        )
 
         return flags
 
@@ -186,13 +188,20 @@ class FileSystem:
 
     def _get_file_data(self, fnode):
         content = b''
-        for num_blocks, first_block in fnode.block_pointer:
-            content += self._read_without_position_change(
-                first_block * self.rmx_volume_information.block_size,
-                num_blocks * self.rmx_volume_information.block_size
-            )
 
+        if fnode.flags.long_file:
+            raise NotImplementedError
+        else:
+            for num_blocks, first_block in fnode.block_pointer:
+                content += self._read_blocks(num_blocks, first_block)
         return content
+
+    def _read_blocks(self, num_blocks, first_block):
+        ''' read  `num_blocks` volume blocks starting from `first_block` '''
+        return self._read_without_position_change(
+            first_block * self.rmx_volume_information.block_size,
+            num_blocks * self.rmx_volume_information.block_size
+        )
 
     def _read_directory(self, fnode):
         assert fnode.type == 'directory'
