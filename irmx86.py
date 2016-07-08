@@ -2,7 +2,6 @@ import sys
 import struct
 from collections import namedtuple
 import os
-from pprint import pprint
 
 filetypes = {
     0: 'fnode_file',
