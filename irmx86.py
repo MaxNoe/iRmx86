@@ -2,6 +2,7 @@ import sys
 import struct
 from collections import namedtuple
 import os
+from functools import lru_cache
 
 filetypes = {
     0: 'fnode_file',
@@ -48,6 +49,19 @@ FileNode = namedtuple(
     ]
 )
 
+
+class File:
+    def __init__(self, abspath, filesystem):
+        self.fnode = filesystem[abspath]
+        assert self.fnode.type == 'data'
+
+        self.filesystem = filesystem
+        self.name = os.path.basename(abspath)
+
+    def read(self):
+        return self.filesystem._gather_blocks(self.fnode.block_pointers)
+
+
 BlockPointer = namedtuple('BlockPointer', ['num_blocks', 'first_block'])
 
 
@@ -57,6 +71,31 @@ class FileSystem:
         self._read_iso_vol_label()
         self._read_rmx_volume_information()
         self._read_fnode_file()
+        self._root = self.fnodes[self.rmx_volume_information.root_fnode]
+        self._cwd = '/'
+
+    @lru_cache()
+    def __getitem__(self, path):
+            path = self.abspath(path)
+            *dirs, filename = path.split('/')[1:]
+
+            current_dir = self._read_directory(self._root)
+            current_node = self._root
+            for d in dirs:
+                try:
+                    current_node = current_dir[d]
+                    current_dir = self._read_directory(current_dir[d])
+                except KeyError:
+                    raise IOError('No such file or directory: {}'.format(path))
+
+            if filename:
+                try:
+                    node = current_dir[filename]
+                except KeyError:
+                    raise IOError('No such file or directory: {}'.format(path))
+            else:
+                node = current_node
+            return node
 
     def _read_without_position_change(self, start, num_bytes):
         current_position = self.fp.tell()
@@ -148,7 +187,7 @@ class FileSystem:
         return FileNode(
             flags, file_type, granularity, owner, creation_time,
             access_time, modification_time, total_size, total_blocks,
-            block_pointers, size, id_count, accessor_data, parent
+            tuple(block_pointers), size, id_count, accessor_data, parent
         )
 
     def _parse_pointer_data(self, data):
@@ -224,7 +263,9 @@ class FileSystem:
             num_blocks * self.rmx_volume_information.block_size
         )
 
+    @lru_cache()
     def _read_directory(self, fnode):
+        ''' returns a dict mapping filenames to file nodes for the given directory '''
         assert fnode.type == 'directory'
 
         data = self._get_file_data(fnode)
@@ -239,17 +280,52 @@ class FileSystem:
 
         return files
 
+    def ls(self, directory=None):
+        fnode = self[directory or self._cwd]
+        if fnode.type == 'data':
+            return directory
+        return list(self._read_directory(fnode).keys())
+
+    def cd(self, directory=None):
+        directory = '/' if directory is None else self.abspath(directory)
+        if self[directory].type == 'directory':
+            self._cwd = directory
+        else:
+            raise IOError('No such directory: {}'.format(directory))
+
+    def walk(self, base=None):
+        base = self.abspath(base) if base else self._cwd
+        dirs = []
+        files = []
+        for name, fnode in self._read_directory(self[base]).items():
+            if fnode.type == 'data':
+                files.append(File(os.path.join(base, name), self))
+            if fnode.type == 'directory':
+                dirs.append(name)
+
+            yield base, dirs, files
+
+        for d in dirs:
+            base, dirs, files = self.walk(base=os.path.join())
+            yield base, dirs, files
+
+    def abspath(self, path):
+        if path.startswith('/'):
+            return path
+        return os.path.join(self._cwd, path)
+
+    def pwd(self):
+        return self._cwd
+
 
 if __name__ == '__main__':
     infile = sys.argv[1]
     isoname, ext = os.path.splitext(infile)
-    with FileSystem(sys.argv[1]) as fs:
 
-        root_fnode = fs.fnodes[fs.rmx_volume_information.root_fnode]
-        files = fs._read_directory(root_fnode)
-        os.makedirs(isoname, exist_ok=True)
-
-        for name, fnode in files.items():
-            if fnode.type == 'data':
-                with open(os.path.join(isoname, name.replace(' ', '_')), 'wb') as f:
-                    f.write(fs._get_file_data(fnode))
+    with FileSystem(infile) as fs:
+        for root, dirs, files in fs.walk('/'):
+            os.makedirs(isoname + root, exist_ok=True)
+            for f in files:
+                outfile = os.path.join(isoname + root, f.name.replace(' ', '_'))
+                with open(outfile, 'wb') as of:
+                    of.write(f.read())
