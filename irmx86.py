@@ -43,7 +43,7 @@ FileMetaData = namedtuple(
     'FileMetaData',
     [
         'flags', 'type', 'granularity', 'owner', 'creation_time', 'access_time',
-        'modification_time', 'total_size', 'total_blocks', 'block_pointer',
+        'modification_time', 'total_size', 'total_blocks', 'block_pointers',
         'size', 'id_count', 'access_rights', 'parent',
     ]
 )
@@ -95,7 +95,7 @@ class FileSystem:
             num_fnodes, fnode_start, fnode_size, root_fnode
         ) = struct.unpack('<10sxBHIHIHH100x', raw_data)
         name = name.decode().strip('\x00')
-        # file_driver = int(file_driver)
+        file_driver = int(file_driver)
 
         self.rmx_volume_information = RMXVolumeInformation(
             name, file_driver, block_size, volume_size,
@@ -134,28 +134,57 @@ class FileSystem:
 
         flags = self._parse_flags(flags)
         file_type = filetypes[file_type]
-        pointer_data = self._parse_pointer_data(pointer_data)
+        pointers = self._parse_pointer_data(pointer_data)
+
+        if flags.long_file:
+            block_pointers = []
+            for num_blocks, first_block in pointers:
+                block_pointers.extend(
+                    self._parse_indirect_blocks(num_blocks, first_block)
+                )
+        else:
+            block_pointers = pointers
 
         return FileMetaData(
             flags, file_type, granularity, owner, creation_time,
             access_time, modification_time, total_size, total_blocks,
-            pointer_data, size, id_count, accessor_data, parent
+            block_pointers, size, id_count, accessor_data, parent
         )
 
     def _parse_pointer_data(self, data):
-        parsed = []
-        for i in range(8):
-            fmt = '<H3s'
-            s = struct.calcsize(fmt)
-            num_blocks, block_address = struct.unpack(fmt, data[i * s: (i + 1) * s])
+        fmt = '<H3s'
+        s = struct.calcsize(fmt)
+        pointers = []
+        for start in range(0, 8 * s, s):
+            num_blocks, block_address = struct.unpack(fmt, data[start: start + s])
 
             if num_blocks == 0:
                 continue
 
-            block_address, = struct.unpack('<I', block_address + b'\x00')
-            parsed.append(BlockPointer(num_blocks, block_address))
+            block_address = self._read_24bit_integer(block_address)
+            pointers.append(BlockPointer(num_blocks, block_address))
 
-        return parsed
+        return pointers
+
+    @staticmethod
+    def _read_24bit_integer(data):
+        val, = struct.unpack('<I', data + b'\x00')
+        return val
+
+    def _parse_indirect_blocks(self, num_blocks, first_block):
+        fmt = '<B3s'
+        s = struct.calcsize(fmt)
+        data = self._read_without_position_change(
+            first_block, num_blocks * s
+        )
+
+        indirect_blocks = []
+        for start in range(0, num_blocks * s, s):
+            num_blocks, block_address = struct.unpack(fmt, data[start: start + s])
+            block_address = self._read_24bit_integer(block_address)
+            indirect_blocks.append(BlockPointer(num_blocks, block_address))
+
+        return indirect_blocks
 
     @staticmethod
     def _parse_flags(flags):
@@ -180,11 +209,9 @@ class FileSystem:
     def _get_file_data(self, fnode):
         content = b''
 
-        if fnode.flags.long_file:
-            raise NotImplementedError
-        else:
-            for num_blocks, first_block in fnode.block_pointer:
-                content += self._read_blocks(num_blocks, first_block)
+        for num_blocks, first_block in fnode.block_pointers:
+            content += self._read_blocks(num_blocks, first_block)
+
         return content
 
     def _read_blocks(self, num_blocks, first_block):
@@ -204,7 +231,7 @@ class FileSystem:
         for first_byte in range(0, len(data), size):
             fnode, name = struct.unpack(fmt, data[first_byte:first_byte + size])
             name = name.decode('ascii').strip('\x00')
-            if self.fnodes[fnode].type in ('directoyr', 'data'):
+            if self.fnodes[fnode].type in ('directory', 'data'):
                 files[name] = self.fnodes[fnode]
 
         return files
@@ -217,7 +244,7 @@ if __name__ == '__main__':
 
         root_fnode = fs.fnodes[fs.rmx_volume_information.root_fnode]
         files = fs._read_directory(root_fnode)
-        os.makedirs(isoname)
+        os.makedirs(isoname, exist_ok=True)
 
         for name, fnode in files.items():
             if fnode.type == 'data':
