@@ -58,6 +58,14 @@ class FileSystem:
         self._read_rmx_volume_information()
         self._read_fnode_file()
 
+    def _read_without_position_change(self, start, num_bytes):
+        current_position = self.fp.tell()
+        self.fp.seek(start, 0)
+        b = self.fp.read(num_bytes)
+        self.fp.seek(current_position, 0)
+
+        return b
+
     def _read_iso_vol_label(self):
 
         raw_data = self._read_without_position_change(768, 128)
@@ -78,14 +86,6 @@ class FileSystem:
             label, name, structure, recording_side,
             interleave_factor, iso_version
         )
-
-    def _read_without_position_change(self, start, num_bytes):
-        current_position = self.fp.tell()
-        self.fp.seek(start, 0)
-        b = self.fp.read(num_bytes)
-        self.fp.seek(current_position, 0)
-
-        return b
 
     def _read_rmx_volume_information(self):
         raw_data = self._read_without_position_change(384, 128)
@@ -145,26 +145,17 @@ class FileSystem:
     def _parse_pointer_data(self, data):
         parsed = []
         for i in range(8):
-            fmt = '<H3B'
+            fmt = '<H3s'
             s = struct.calcsize(fmt)
-            num_blocks, *block_address = struct.unpack(fmt, data[i * s: (i + 1) * s])
+            num_blocks, block_address = struct.unpack(fmt, data[i * s: (i + 1) * s])
 
             if num_blocks == 0:
                 continue
 
-            block_address = self.build_block_address(block_address)
+            block_address, = struct.unpack('<I', block_address + b'\x00')
             parsed.append(BlockPointer(num_blocks, block_address))
 
         return parsed
-
-    @staticmethod
-    def build_block_address(block_address):
-        '''Convert the three integers of the block_address to the correct 24bit integer'''
-        binary_address = ''.join(
-            map(lambda x: '{:08b}'.format(x)[::-1],
-                block_address)
-        )[::-1]
-        return int(binary_address, base=2)
 
     @staticmethod
     def _parse_flags(flags):
