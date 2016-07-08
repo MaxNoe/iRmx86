@@ -2,6 +2,7 @@ import sys
 import struct
 from collections import namedtuple
 import os
+from pprint import pprint
 
 filetypes = {
     0: 'fnode_file',
@@ -194,13 +195,33 @@ class FileSystem:
 
         return content
 
+    def _read_directory(self, fnode):
+        assert fnode.type == 'directory'
+
+        data = self._get_file_data(fnode)
+        fmt = 'H14s'
+        size = struct.calcsize(fmt)
+        files = {}
+        for first_byte in range(0, len(data), size):
+            fnode, name = struct.unpack(fmt, data[first_byte:first_byte + size])
+            name = name.decode('ascii').strip('\x00')
+            if self.fnodes[fnode].type in ('directoyr', 'data'):
+                files[name] = self.fnodes[fnode]
+
+        return files
+
+
 if __name__ == '__main__':
     infile = sys.argv[1]
-    name, ext = os.path.splitext(infile)
+    isoname, ext = os.path.splitext(infile)
     with FileSystem(sys.argv[1]) as fs:
-        for fnode in fs.fnodes:
-            files_read = 0
+
+        root_fnode = fs.fnodes[fs.rmx_volume_information.root_fnode]
+        files = fs._read_directory(root_fnode)
+        os.makedirs(isoname)
+
+        for name, fnode in files.items():
             if fnode.type == 'data':
-                with open(name + '_{:03d}.raw'.format(files_read), 'wb') as f:
+                os.path
+                with open(os.path.join(isoname, name.replace(' ', '_')), 'wb') as f:
                     f.write(fs._get_file_data(fnode))
-                files_read += 1
