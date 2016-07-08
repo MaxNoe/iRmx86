@@ -39,8 +39,8 @@ RMXVolumeInformation = namedtuple(
 
 )
 
-FileMetaData = namedtuple(
-    'FileMetaData',
+FileNode = namedtuple(
+    'FileNode',
     [
         'flags', 'type', 'granularity', 'owner', 'creation_time', 'access_time',
         'modification_time', 'total_size', 'total_blocks', 'block_pointers',
@@ -145,7 +145,7 @@ class FileSystem:
         else:
             block_pointers = pointers
 
-        return FileMetaData(
+        return FileNode(
             flags, file_type, granularity, owner, creation_time,
             access_time, modification_time, total_size, total_blocks,
             block_pointers, size, id_count, accessor_data, parent
@@ -207,9 +207,12 @@ class FileSystem:
         self.fp.close()
 
     def _get_file_data(self, fnode):
+        return self._gather_blocks(fnode.block_pointers)
+
+    def _gather_blocks(self, block_pointers):
         content = b''
 
-        for num_blocks, first_block in fnode.block_pointers:
+        for num_blocks, first_block in block_pointers:
             content += self._read_blocks(num_blocks, first_block)
 
         return content
@@ -248,6 +251,5 @@ if __name__ == '__main__':
 
         for name, fnode in files.items():
             if fnode.type == 'data':
-                os.path
                 with open(os.path.join(isoname, name.replace(' ', '_')), 'wb') as f:
                     f.write(fs._get_file_data(fnode))
