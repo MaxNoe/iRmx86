@@ -3,6 +3,7 @@ import struct
 from collections import namedtuple
 import os
 from functools import lru_cache
+import argparse
 
 filetypes = {
     0: 'fnode_file',
@@ -318,14 +319,23 @@ class FileSystem:
         return self._cwd
 
 
-if __name__ == '__main__':
-    infile = sys.argv[1]
-    isoname, ext = os.path.splitext(infile)
+def main():
+    parser = argparse.ArgumentParser(
+        description='Extract files from an irmx86 device or image',
+        prog='irmx86_extract',
+    )
+    parser.add_argument('device', help='iRmx86 formatted device or image')
+    parser.add_argument('output', help='Where to store the extracted files')
+    args = parser.parse_args()
 
-    with FileSystem(infile) as fs:
+    with FileSystem(args.device) as fs:
         for root, dirs, files in fs.walk('/'):
-            os.makedirs(isoname + root, exist_ok=True)
+            os.makedirs(args.output + root, exist_ok=True)
             for f in files:
-                outfile = os.path.join(isoname + root, f.name.replace(' ', '_'))
+                outfile = os.path.join(args.output + root, f.name.replace(' ', '_'))
                 with open(outfile, 'wb') as of:
                     of.write(f.read())
+
+
+if __name__ == '__main__':
+    main()
