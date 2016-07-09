@@ -307,7 +307,7 @@ class FileSystem:
             yield base, dirs, files
 
         for d in dirs:
-            base, dirs, files = self.walk(base=os.path.join())
+            base, dirs, files = self.walk(base=os.path.join(base, d))
             yield base, dirs, files
 
     def abspath(self, path):
