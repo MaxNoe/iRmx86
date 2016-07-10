@@ -53,7 +53,7 @@ FileNode = namedtuple(
 
 class File:
     def __init__(self, abspath, filesystem):
-        self.fnode = filesystem[abspath]
+        self.fnode = filesystem._path_to_fnode(abspath)
         assert self.fnode.type == 'data'
 
         self.filesystem = filesystem
@@ -61,6 +61,31 @@ class File:
 
     def read(self):
         return self.filesystem._gather_blocks(self.fnode.block_pointers)
+
+
+class Directory:
+    def __init__(self, abspath, filesystem):
+        self.fnode = filesystem._path_to_fnode(abspath)
+        assert self.fnode.type == 'directory'
+        self.filesystem = filesystem
+        self.abspath = abspath
+
+        self.files = []
+        self.directories = []
+        for name, fnode in filesystem._read_directory(self.fnode).items():
+            if fnode.type == 'data':
+                self.files.append(name)
+            elif fnode.type == 'directory':
+                self.directories.append()
+
+    def __getitem__(self, path):
+        return self.filesystem[os.path.join(self.abspath, path)]
+
+    def ls(self):
+        return {'dirs': self.directories, 'files': self.files}
+
+    def walk(self):
+        return self.filesystem.walk(self.abspath)
 
 
 BlockPointer = namedtuple('BlockPointer', ['num_blocks', 'first_block'])
@@ -75,8 +100,16 @@ class FileSystem:
         self._root = self.fnodes[self.rmx_volume_information.root_fnode]
         self._cwd = '/'
 
-    @lru_cache()
     def __getitem__(self, path):
+        path = self.abspath(path)
+        fnode = self._path_to_fnode(path)
+        if fnode.type == 'data':
+            return File(path, self)
+        elif fnode.type == 'directory':
+            return Directory(path, self)
+
+    @lru_cache()
+    def _path_to_fnode(self, path):
             path = self.abspath(path)
             *dirs, filename = path.split('/')[1:]
 
@@ -282,7 +315,7 @@ class FileSystem:
         return files
 
     def ls(self, directory=None):
-        fnode = self[directory or self._cwd]
+        fnode = self._path_to_fnode(directory or self._cwd)
         if fnode.type == 'data':
             return directory
         return list(self._read_directory(fnode).keys())
@@ -296,19 +329,15 @@ class FileSystem:
 
     def walk(self, base=None):
         base = self.abspath(base) if base else self._cwd
-        dirs = []
-        files = []
-        for name, fnode in self._read_directory(self[base]).items():
-            if fnode.type == 'data':
-                files.append(File(os.path.join(base, name), self))
-            if fnode.type == 'directory':
-                dirs.append(name)
+        basedir = self[base]
 
-            yield base, dirs, files
+        files = [basedir[f] for f in basedir.files]
+        dirs = [basedir[d] for d in basedir.directories]
+
+        yield base, dirs, files
 
         for d in dirs:
-            base, dirs, files = self.walk(base=os.path.join(base, d))
-            yield base, dirs, files
+            yield from self.walk(base=os.path.join())
 
     def abspath(self, path):
         if path.startswith('/'):
