@@ -332,7 +332,7 @@ class FileSystem:
 
     def cd(self, directory=None):
         directory = '/' if directory is None else self.abspath(directory)
-        if self[directory].type == 'directory':
+        if self._path_to_fnode(directory).type == 'directory':
             self._cwd = directory
         else:
             raise IOError('No such directory: {}'.format(directory))
