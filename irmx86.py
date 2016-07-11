@@ -4,6 +4,7 @@ import os
 from functools import lru_cache
 import argparse
 import logging
+from datetime import datetime, timedelta
 
 filetypes = {
     0: 'fnode_file',
@@ -56,6 +57,10 @@ class File:
         self.fnode = filesystem._path_to_fnode(abspath)
         assert self.fnode.type == 'data'
 
+        self.creation_time = self.fnode.creation_time
+        self.modification_time = self.fnode.creation_time
+        self.access_time = self.fnode.access_time
+
         self.filesystem = filesystem
         self.abspath = abspath
         self.name = os.path.basename(abspath)
@@ -73,6 +78,10 @@ class Directory:
         assert self.fnode.type == 'directory'
         self.filesystem = filesystem
         self.abspath = abspath
+
+        self.creation_time = self.fnode.creation_time
+        self.modification_time = self.fnode.creation_time
+        self.access_time = self.fnode.access_time
 
         self.files = []
         self.directories = []
@@ -99,12 +108,14 @@ BlockPointer = namedtuple('BlockPointer', ['num_blocks', 'first_block'])
 
 
 class FileSystem:
-    def __init__(self, filename):
+    def __init__(self, filename, epoch=datetime(1978, 1, 1)):
         self.fp = open(filename, 'rb')
+        self.epoch = epoch
+        self._fnodes = {}
         self._read_iso_vol_label()
         self._read_rmx_volume_information()
         self._read_fnode_file()
-        self._root = self.fnodes[self.rmx_volume_information.root_fnode]
+        self._root = self._fnodes[self.rmx_volume_information.root_fnode]
         self._cwd = '/'
 
     def __getitem__(self, path):
@@ -194,13 +205,15 @@ class FileSystem:
             start, num_fnodes * fnode_size,
         )
 
-        self.fnodes = []
-        for i in range(num_fnodes):
-            fnode_data = raw_data[i * fnode_size: (i + 1) * fnode_size]
+        for fnode_id in range(num_fnodes):
+            start = fnode_id * fnode_size
+            end = (fnode_id + 1) * fnode_size
+            fnode_data = raw_data[start:end]
+
             fnode = self._read_fnode(fnode_data)
 
             if fnode.flags.allocated and not fnode.flags.deleted:
-                self.fnodes.append(fnode)
+                self._fnodes[fnode_id] = fnode
 
     def _read_fnode(self, raw_data):
         fmt = '<HBBHIIIII40sI4xH9sH'
@@ -218,6 +231,9 @@ class FileSystem:
         flags = self._parse_flags(flags)
         file_type = filetypes[file_type]
         pointers = self._parse_pointer_data(pointer_data)
+        creation_time = self.epoch + timedelta(seconds=creation_time)
+        access_time = self.epoch + timedelta(seconds=access_time)
+        modification_time = self.epoch + timedelta(seconds=modification_time)
 
         if flags.long_file:
             block_pointers = []
@@ -319,13 +335,14 @@ class FileSystem:
         for first_byte in range(0, len(data), size):
             try:
                 fnode, name = struct.unpack(fmt, data[first_byte:first_byte + size])
-                if fnode == 16448:
+                if name == 14 * b'@':
                     continue
-                name = name.decode('ascii').strip('\x00')
-                if self.fnodes[fnode].type in ('directory', 'data'):
-                    files[name] = self.fnodes[fnode]
+                name = name.strip(b'\x00').decode('ascii')
+                if self._fnodes[fnode].type in ('directory', 'data'):
+                    files[name] = self._fnodes[fnode]
             except (IndexError, UnicodeDecodeError):
-                logging.warn('Could not read file {} at fnode {}'.format(name, fnode))
+                msg = 'Could not read file entry {} at fnode {} in directory'
+                logging.warn(msg.format(name, fnode))
 
         return files
 
@@ -379,6 +396,11 @@ def main():
                 outfile = os.path.join(args.output + root, f.name.replace(' ', '_'))
                 with open(outfile, 'wb') as of:
                     of.write(f.read())
+
+                os.utime(
+                    outfile,
+                    (f.access_time.timestamp(), f.modification_time.timestamp())
+                )
 
 
 if __name__ == '__main__':
