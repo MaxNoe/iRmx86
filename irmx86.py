@@ -57,10 +57,14 @@ class File:
         assert self.fnode.type == 'data'
 
         self.filesystem = filesystem
+        self.abspath = abspath
         self.name = os.path.basename(abspath)
 
     def read(self):
         return self.filesystem._gather_blocks(self.fnode.block_pointers)
+
+    def __repr__(self):
+        return 'File({}) at {}'.format(self.abspath, self.filesystem.fp.name)
 
 
 class Directory:
@@ -87,6 +91,9 @@ class Directory:
     def walk(self):
         return self.filesystem.walk(self.abspath)
 
+    def __repr__(self):
+        return 'Directory({}) at {}'.format(self.abspath, self.filesystem.fp.name)
+
 
 BlockPointer = namedtuple('BlockPointer', ['num_blocks', 'first_block'])
 
@@ -107,6 +114,9 @@ class FileSystem:
             return File(path, self)
         elif fnode.type == 'directory':
             return Directory(path, self)
+
+    def __repr__(self):
+        return 'iRmx86-Filesystem at {}'.format(self.fp.name)
 
     @lru_cache()
     def _path_to_fnode(self, path):
