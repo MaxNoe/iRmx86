@@ -80,7 +80,7 @@ class Directory:
             if fnode.type == 'data':
                 self.files.append(name)
             elif fnode.type == 'directory':
-                self.directories.append()
+                self.directories.append(name)
 
     def __getitem__(self, path):
         return self.filesystem[os.path.join(self.abspath, path)]
@@ -317,10 +317,16 @@ class FileSystem:
         size = struct.calcsize(fmt)
         files = {}
         for first_byte in range(0, len(data), size):
-            fnode, name = struct.unpack(fmt, data[first_byte:first_byte + size])
-            name = name.decode('ascii').strip('\x00')
-            if self.fnodes[fnode].type in ('directory', 'data'):
-                files[name] = self.fnodes[fnode]
+            try:
+                fnode, name = struct.unpack(fmt, data[first_byte:first_byte + size])
+                try:
+                    name = name.decode('ascii').strip('\x00')
+                except UnicodeDecodeError:
+                    name = 'unknown'
+                if self.fnodes[fnode].type in ('directory', 'data'):
+                    files[name] = self.fnodes[fnode]
+            except (IndexError, UnicodeDecodeError):
+                print('Could not read file {} at fnode {}'.format(name, fnode))
 
         return files
 
