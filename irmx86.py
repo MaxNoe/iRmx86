@@ -1,9 +1,9 @@
-import sys
 import struct
 from collections import namedtuple
 import os
 from functools import lru_cache
 import argparse
+import logging
 
 filetypes = {
     0: 'fnode_file',
@@ -199,7 +199,7 @@ class FileSystem:
             fnode_data = raw_data[i * fnode_size: (i + 1) * fnode_size]
             fnode = self._read_fnode(fnode_data)
 
-            if fnode.flags.allocated:
+            if fnode.flags.allocated and not fnode.flags.deleted:
                 self.fnodes.append(fnode)
 
     def _read_fnode(self, raw_data):
@@ -319,14 +319,13 @@ class FileSystem:
         for first_byte in range(0, len(data), size):
             try:
                 fnode, name = struct.unpack(fmt, data[first_byte:first_byte + size])
-                try:
-                    name = name.decode('ascii').strip('\x00')
-                except UnicodeDecodeError:
-                    name = 'unknown'
+                if fnode == 16448:
+                    continue
+                name = name.decode('ascii').strip('\x00')
                 if self.fnodes[fnode].type in ('directory', 'data'):
                     files[name] = self.fnodes[fnode]
             except (IndexError, UnicodeDecodeError):
-                print('Could not read file {} at fnode {}'.format(name, fnode))
+                logging.warn('Could not read file {} at fnode {}'.format(name, fnode))
 
         return files
 
@@ -353,7 +352,7 @@ class FileSystem:
         yield base, dirs, files
 
         for d in dirs:
-            yield from self.walk(base=os.path.join())
+            yield from self.walk(base=d.abspath)
 
     def abspath(self, path):
         if path.startswith('/'):
