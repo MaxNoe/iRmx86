@@ -2,7 +2,7 @@ from distutils.core import setup
 
 setup(
     name='irmx86',
-    version='0.0.1',
+    version='0.1.0',
     description='ReadOnly implementation of the irmx86 file system',
     url='https://github.com/tudo-spect/iRmx86',
     author='Maximilian Nöthe',
