@@ -131,26 +131,26 @@ class FileSystem:
 
     @lru_cache()
     def _path_to_fnode(self, path):
-            path = self.abspath(path)
-            *dirs, filename = path.split('/')[1:]
+        path = self.abspath(path)
+        *dirs, filename = path.split('/')[1:]
 
-            current_dir = self._read_directory(self._root)
-            current_node = self._root
-            for d in dirs:
-                try:
-                    current_node = current_dir[d]
-                    current_dir = self._read_directory(current_dir[d])
-                except KeyError:
-                    raise IOError('No such file or directory: {}'.format(path))
+        current_dir = self._read_directory(self._root)
+        current_node = self._root
+        for d in dirs:
+            try:
+                current_node = current_dir[d]
+                current_dir = self._read_directory(current_dir[d])
+            except KeyError:
+                raise IOError('No such file or directory: {}'.format(path))
 
-            if filename:
-                try:
-                    node = current_dir[filename]
-                except KeyError:
-                    raise IOError('No such file or directory: {}'.format(path))
-            else:
-                node = current_node
-            return node
+        if filename:
+            try:
+                node = current_dir[filename]
+            except KeyError:
+                raise IOError('No such file or directory: {}'.format(path))
+        else:
+            node = current_node
+        return node
 
     def _read_without_position_change(self, start, num_bytes):
         current_position = self.fp.tell()
